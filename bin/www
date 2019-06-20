@@ -1,0 +1,171 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('wsockets:server');
+var http = require('http');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+const io = require('socket.io')(server);
+
+let images = [];
+let imagesLength;
+let timeout;
+let startPoint = 0;
+let interval;
+// TODO: Check implementation  of OMX Player - https://www.npmjs.com/package/node-omxplayer
+io.on('connection', (socket) => {
+  console.log('connection received')
+  socket.on("start", (data) => {
+    interval = data.timer;
+    images = data.images;
+    imagesLength = images.length;
+    startPoint = 0;
+    playMedia(socket, true);
+  });
+
+  socket.on("previous", () => {
+    clearInterval(timeout);
+    decrementStartPoint();
+    playMedia(socket);
+  });
+
+  socket.on("next", () => {
+    clearInterval(timeout);
+    incrementStartPoint();
+    playMedia(socket);
+  });
+
+  socket.on("continue", () => {
+    playMedia(socket, true);
+  });
+
+  socket.on("pause", () => {
+    clearInterval(timeout);
+    socket.emit("stopped", true);
+  });
+
+  socket.on("stop", () => {
+    clearInterval(timeout);
+    socket.emit("stopped", true);
+  });
+
+});
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function restartIntervalCheck(currentPoint, imagesLength) {
+  currentPoint++;
+  if(currentPoint >= imagesLength) {
+    return 0;
+  }
+  return currentPoint;
+}
+
+function incrementStartPoint() {
+  startPoint = restartIntervalCheck(startPoint, imagesLength);
+}
+
+function decrementStartPoint() {
+  startPoint--;
+  if (startPoint < 0) {
+    startPoint = images.length - 1;
+  }
+}
+
+function playMedia(socket, startOrContinuePlaying) {
+  socket.emit("currentlyPlaying", images[startPoint]);
+  console.log(startPoint);
+  let fromScratch = false;
+  if (startOrContinuePlaying) {
+    fromScratch = true;
+  }
+  timeout = setInterval(() => {
+    if (fromScratch) {
+      startPoint = restartIntervalCheck(startPoint, imagesLength);
+      fromScratch = false;
+    }
+    socket.emit("currentlyPlaying", images[startPoint]);
+    startPoint = restartIntervalCheck(startPoint, imagesLength);
+  }, interval);
+}
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
